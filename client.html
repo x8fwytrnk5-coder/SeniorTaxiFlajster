@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Klient – Objednávka jazdy</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: system-ui, sans-serif;
+    background: #0d1018;
+    color: #f5f5f5;
+  }
+
+  h1 {
+    margin-top: 0;
+    font-size: 22px;
+  }
+
+  #map {
+    height: 220px;
+    border-radius: 14px;
+    margin-bottom: 16px;
+    border: 1px solid #262a3a;
+  }
+
+  .field {
+    margin-bottom: 14px;
+  }
+
+  label {
+    font-size: 13px;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid #33384a;
+    background: #111522;
+    color: #fff;
+    font-size: 14px;
+  }
+
+  button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    background: linear-gradient(135deg, #3ddcff, #00ffa3);
+    color: #000;
+    margin-top: 10px;
+  }
+
+  #gpsBtn {
+    background: linear-gradient(135deg, #ffd54f, #ffb300);
+    color: #000;
+  }
+
+  .suggestions {
+    background: #111522;
+    border: 1px solid #33384a;
+    border-radius: 10px;
+    margin-top: 4px;
+    max-height: 160px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .suggestion-item {
+    padding: 8px;
+    cursor: pointer;
+    border-bottom: 1px solid #1a1e2a;
+  }
+
+  .suggestion-item:hover {
+    background: #181c28;
+  }
+
+  #statusBox {
+    margin-top: 16px;
+    padding: 12px;
+    background: #111522;
+    border-radius: 10px;
+    border: 1px solid #33384a;
+    display: none;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>Objednávka jazdy</h1>
+
+<div id="map"></div>
+
+<button id="gpsBtn">Použiť moju polohu</button>
+
+<div class="field">
+  <label>Nástup</label>
+  <input type="text" id="pickupInput" placeholder="Zadajte adresu nástupu">
+  <div id="pickupSuggestions" class="suggestions"></div>
+</div>
+
+<div class="field">
+  <label>Výstup</label>
+  <input type="text" id="dropoffInput" placeholder="Zadajte adresu výstupu">
+  <div id="dropoffSuggestions" class="suggestions"></div>
+</div>
+
+<button id="calcBtn">Vypočítať cenu</button>
+<button id="sendBtn" disabled>Odoslať objednávku</button>
+
+<div id="statusBox"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+const ORS_API_KEY =
+  "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjVjNDY1YWFiMTFjNjQ4MWM4MWM0M2RhOWI5MmZiMDg3IiwiaCI6Im11cm11cjY0In0=";
+
+let pickup = null;
+let dropoff = null;
+
+const pickupInput = document.getElementById("pickupInput");
+const dropoffInput = document.getElementById("dropoffInput");
+
+const pickupSuggestions = document.getElementById("pickupSuggestions");
+const dropoffSuggestions = document.getElementById("dropoffSuggestions");
+
+const gpsBtn = document.getElementById("gpsBtn");
+const calcBtn = document.getElementById("calcBtn");
+const sendBtn = document.getElementById("sendBtn");
+const statusBox = document.getElementById("statusBox");
+
+// Mapa
+const map = L.map("map").setView([48.5, 19.5], 7);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+let pickupMarker = null;
+let dropoffMarker = null;
+
+function updateMarker(type, loc) {
+  const icon = L.circleMarker([loc.lat, loc.lon], {
+    radius: 7,
+    weight: 2,
+    color: type === "pickup" ? "#ffd54f" : "#ff5252",
+    fillColor: type === "pickup" ? "#ffd54f" : "#ff5252",
+    fillOpacity: 0.9,
+  });
+
+  if (type === "pickup") {
+    if (pickupMarker) map.removeLayer(pickupMarker);
+    pickupMarker = icon.addTo(map);
+  } else {
+    if (dropoffMarker) map.removeLayer(dropoffMarker);
+    dropoffMarker = icon.addTo(map);
+  }
+
+  const points = [];
+  if (pickupMarker) points.push(pickupMarker.getLatLng());
+  if (dropoffMarker) points.push(dropoffMarker.getLatLng());
+
+  if (points.length) {
+    const bounds = L.latLngBounds(points);
+    map.fitBounds(bounds, { padding: [30, 30] });
+  }
+}
+
+// GPS → nástup
+gpsBtn.onclick = () => {
+  if (!navigator.geolocation) {
+    alert("Toto zariadenie nepodporuje GPS.");
+    return;
+  }
+
+  gpsBtn.disabled = true;
+  gpsBtn.textContent = "Získavam polohu...";
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      pickup = { lat, lon, label: "Moja poloha" };
+      pickupInput.value = "Moja poloha";
+
+      updateMarker("pickup", pickup);
+
+      map.setView([lat, lon], 14);
+
+      gpsBtn.disabled = false;
+      gpsBtn.textContent = "Použiť moju polohu";
+    },
+    () => {
+      alert("Nepodarilo sa získať GPS polohu.");
+      gpsBtn.disabled = false;
+      gpsBtn.textContent = "Použiť moju polohu";
+    }
+  );
+};
+
+// Našeptávanie
+async function fetchSuggestions(query) {
+  if (!query || query.length < 3) return [];
+  const url = `https://api.openrouteservice.org/geocode/autocomplete?api_key=${ORS_API_KEY}&text=${encodeURIComponent(query)}&size=5&boundary.country=SK`;
+  const res = await fetch(url);
+  const data = await res.json();
+  return data.features?.map(f => ({
+    label: f.properties.label,
+    lat: f.geometry.coordinates[1],
+    lon: f.geometry.coordinates[0],
+  })) || [];
+}
+
+function showSuggestions(container, items, onSelect) {
+  if (!items.length) {
+    container.style.display = "none";
+    return;
+  }
+  container.innerHTML = "";
+  items.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "suggestion-item";
+    div.textContent = item.label;
+    div.onclick = () => {
+      onSelect(item);
+      container.style.display = "none";
+    };
+    container.appendChild(div);
+  });
+  container.style.display = "block";
+}
+
+pickupInput.oninput = async () => {
+  const q = pickupInput.value.trim();
+  const s = await fetchSuggestions(q);
+  showSuggestions(pickupSuggestions, s, item => {
+    pickup = item;
+    pickupInput.value = item.label;
+    updateMarker("pickup", pickup);
+  });
+};
+
+dropoffInput.oninput = async () => {
+  const q = dropoffInput.value.trim();
+  const s = await fetchSuggestions(q);
+  showSuggestions(dropoffSuggestions, s, item => {
+    dropoff = item;
+    dropoffInput.value = item.label;
+    updateMarker("dropoff", dropoff);
+  });
+};
+
+// Výpočet ceny
+async function getRoute(from, to) {
+  const url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson";
+  const body = { coordinates: [[from.lon, from.lat], [to.lon, to.lat]] };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: ORS_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  const meters = data.features[0].properties.summary.distance;
+  return meters / 1000;
+}
+
+calcBtn.onclick = async () => {
+  if (!pickup || !dropoff) {
+    alert("Vyplňte nástup aj výstup.");
+    return;
+  }
+
+  calcBtn.disabled = true;
+  calcBtn.textContent = "Počítam...";
+
+  const km = await getRoute(pickup, dropoff);
+  const cena = km * 0.85;
+
+  statusBox.style.display = "block";
+  statusBox.innerHTML = `
+    <strong>Vzdialenosť:</strong> ${km.toFixed(2)} km<br>
+    <strong>Cena:</strong> ${cena.toFixed(2)} €
+  `;
+
+  sendBtn.disabled = false;
+  calcBtn.disabled = false;
+  calcBtn.textContent = "Vypočítať cenu";
+};
+
+// Odoslanie objednávky
+sendBtn.onclick = () => {
+  statusBox.style.display = "block";
+  statusBox.innerHTML = `
+    <strong>Objednávka odoslaná!</strong><br>
+    (Simulácia – neskôr API)
+  `;
+};
+</script>
+
+</body>
+</html>
