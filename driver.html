@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vodič – Panel</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: system-ui, sans-serif;
+    background: #0d1018;
+    color: #f5f5f5;
+  }
+
+  h1 {
+    margin-top: 0;
+    font-size: 22px;
+  }
+
+  .status {
+    padding: 6px 10px;
+    background: #222633;
+    border-radius: 8px;
+    display: inline-block;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  #map {
+    height: 220px;
+    border-radius: 14px;
+    margin: 12px 0 16px;
+    border: 1px solid #262a3a;
+  }
+
+  .order {
+    background: #111522;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid #33384a;
+    margin-bottom: 12px;
+  }
+
+  .order h3 {
+    margin: 0 0 6px;
+    font-size: 16px;
+  }
+
+  button {
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    background: linear-gradient(135deg, #3ddcff, #00ffa3);
+    color: #000;
+    margin-top: 10px;
+  }
+
+  #activeRide {
+    margin-top: 20px;
+    padding: 14px;
+    background: #111522;
+    border-radius: 12px;
+    border: 1px solid #33384a;
+    display: none;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>Vodičský panel</h1>
+
+<div id="driverStatus" class="status">Stav: VOĽNÝ</div>
+<button id="gpsBtn" style="margin-left:10px;">Zapnúť GPS</button>
+
+<div id="map"></div>
+
+<h2>Prijaté objednávky</h2>
+<div id="orders"></div>
+
+<div id="activeRide">
+  <h2>Aktívna jazda</h2>
+  <div id="rideInfo"></div>
+  <button id="finishRideBtn">Ukončiť jazdu</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Simulované objednávky
+let orders = [
+  {
+    id: 1,
+    pickup: "Krupina, Železničná stanica",
+    dropoff: "Zvolen, Nemocnica",
+    distance: 23.4,
+    price: 19.89
+  },
+  {
+    id: 2,
+    pickup: "Dobrá Niva, Centrum",
+    dropoff: "Zvolen, Sekier",
+    distance: 12.1,
+    price: 10.28
+  }
+];
+
+let activeRide = null;
+
+const ordersEl = document.getElementById("orders");
+const driverStatus = document.getElementById("driverStatus");
+const activeRideBox = document.getElementById("activeRide");
+const rideInfo = document.getElementById("rideInfo");
+const finishRideBtn = document.getElementById("finishRideBtn");
+const gpsBtn = document.getElementById("gpsBtn");
+
+// Mapa + GPS
+const map = L.map("map").setView([48.5, 19.5], 7);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+let driverMarker = null;
+
+gpsBtn.onclick = () => {
+  if (!navigator.geolocation) {
+    alert("Toto zariadenie nepodporuje GPS.");
+    return;
+  }
+
+  gpsBtn.disabled = true;
+  gpsBtn.textContent = "Získavam polohu...";
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      if (driverMarker) map.removeLayer(driverMarker);
+      driverMarker = L.circleMarker([lat, lon], {
+        radius: 7,
+        weight: 2,
+        color: "#3ddcff",
+        fillColor: "#3ddcff",
+        fillOpacity: 0.9
+      }).addTo(map);
+
+      map.setView([lat, lon], 13);
+
+      gpsBtn.disabled = false;
+      gpsBtn.textContent = "Aktualizovať GPS";
+    },
+    () => {
+      alert("Nepodarilo sa získať GPS polohu.");
+      gpsBtn.disabled = false;
+      gpsBtn.textContent = "Zapnúť GPS";
+    }
+  );
+};
+
+function renderOrders() {
+  ordersEl.innerHTML = "";
+
+  if (orders.length === 0) {
+    ordersEl.innerHTML = "<p>Žiadne nové objednávky.</p>";
+    return;
+  }
+
+  orders.forEach(order => {
+    const div = document.createElement("div");
+    div.className = "order";
+    div.innerHTML = `
+      <h3>Objednávka #${order.id}</h3>
+      <div><strong>Nástup:</strong> ${order.pickup}</div>
+      <div><strong>Výstup:</strong> ${order.dropoff}</div>
+      <div><strong>Vzdialenosť:</strong> ${order.distance} km</div>
+      <div><strong>Cena:</strong> ${order.price.toFixed(2)} €</div>
+      <button onclick="acceptOrder(${order.id})">Prijať jazdu</button>
+    `;
+    ordersEl.appendChild(div);
+  });
+}
+
+function acceptOrder(id) {
+  const order = orders.find(o => o.id === id);
+  if (!order) return;
+
+  activeRide = order;
+  orders = orders.filter(o => o.id !== id);
+
+  driverStatus.textContent = "Stav: OBSADENÝ";
+  driverStatus.style.background = "#ff5252";
+
+  rideInfo.innerHTML = `
+    <p><strong>Nástup:</strong> ${order.pickup}</p>
+    <p><strong>Výstup:</strong> ${order.dropoff}</p>
+    <p><strong>Vzdialenosť:</strong> ${order.distance} km</p>
+    <p><strong>Cena:</strong> ${order.price.toFixed(2)} €</p>
+  `;
+
+  activeRideBox.style.display = "block";
+  renderOrders();
+}
+
+finishRideBtn.onclick = () => {
+  activeRide = null;
+  activeRideBox.style.display = "none";
+
+  driverStatus.textContent = "Stav: VOĽNÝ";
+  driverStatus.style.background = "#222633";
+};
+
+renderOrders();
+</script>
+
+</body>
+</html>
