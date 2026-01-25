@@ -482,47 +482,75 @@
       dropoffSuggestions.style.display = "none";
   });
 
-  // GPS
-  useGpsBtn.onclick = () => {
-    if (!navigator.geolocation) {
-      alert("Toto zariadenie nepodporuje GPS.");
-      return;
-    }
+// GPS – verzia pre AppCreator24 WebView
+useGpsBtn.onclick = () => {
+  if (!navigator.geolocation) {
+    alert("Toto zariadenie nepodporuje GPS.");
+    return;
+  }
 
-    useGpsBtn.disabled = true;
-    useGpsBtn.textContent = "Získavam polohu...";
+  useGpsBtn.disabled = true;
+  useGpsBtn.textContent = "Získavam polohu...";
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
+  // Bezpečnostný timeout – AppCreator24 WebView to niekedy drží 10+ sekúnd
+  let timeout = setTimeout(() => {
+    alert("GPS reaguje pomaly. Skúste to znova.");
+    useGpsBtn.disabled = false;
+    useGpsBtn.textContent = "Použiť moju polohu (GPS)";
+  }, 8000);
 
-        try {
-          const url = `https://api.openrouteservice.org/geocode/reverse?api_key=${encodeURIComponent(
-            ORS_API_KEY
-          )}&point.lon=${lon}&point.lat=${lat}`;
-          const res = await fetch(url);
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      clearTimeout(timeout);
+
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      // Fallback label – ak reverse geocoding zlyhá
+      let label = "Moja poloha";
+
+      try {
+        const url = `https://api.openrouteservice.org/geocode/reverse?api_key=${encodeURIComponent(
+          ORS_API_KEY
+        )}&point.lon=${lon}&point.lat=${lat}`;
+
+        const res = await fetch(url);
+        if (res.ok) {
           const data = await res.json();
-          const label =
-            data.features?.[0]?.properties?.label || "Moja poloha";
-
-          driverLocation = { lat, lon, label };
-          driverInput.value = label;
-          updateMarker("driver", driverLocation);
-        } catch {
-          alert("Nepodarilo sa získať adresu z GPS.");
+          label = data.features?.[0]?.properties?.label || "Moja poloha";
         }
-
-        useGpsBtn.disabled = false;
-        useGpsBtn.textContent = "Použiť moju polohu (GPS)";
-      },
-      () => {
-        alert("Nepodarilo sa získať GPS polohu.");
-        useGpsBtn.disabled = false;
-        useGpsBtn.textContent = "Použiť moju polohu (GPS)";
+      } catch (e) {
+        // nič – fallback label ostáva
       }
-    );
-  };
+
+      driverLocation = { lat, lon, label };
+      driverInput.value = label;
+      updateMarker("driver", driverLocation);
+
+      useGpsBtn.disabled = false;
+      useGpsBtn.textContent = "Použiť moju polohu (GPS)";
+    },
+
+    // Error callback
+    (err) => {
+      clearTimeout(timeout);
+
+      // AppCreator24 WebView niekedy vráti null error → fallback
+      alert("Nepodarilo sa získať GPS polohu. Skúste to znova.");
+
+      useGpsBtn.disabled = false;
+      useGpsBtn.textContent = "Použiť moju polohu (GPS)";
+    },
+
+    // Dôležité pre WebView – bez tohto GPS často nefunguje
+    {
+      enableHighAccuracy: true,
+      timeout: 7000,
+      maximumAge: 0
+    }
+  );
+};
+
 
   // Použiť polohu vodiča ako nástup
   useDriverAsPickupBtn.onclick = () => {
